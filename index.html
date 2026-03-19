@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>精准概率转盘 - 带管理面板</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f7f6; padding: 20px; }
+        .main-layout { display: flex; gap: 40px; align-items: flex-start; margin-top: 20px; }
+        
+        /* 转盘区域 */
+        .wheel-box { position: relative; width: 400px; height: 400px; }
+        .pointer { 
+            position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+            width: 0; height: 0; border-left: 15px solid transparent; border-right: 15px solid transparent;
+            border-top: 40px solid #e74c3c; z-index: 10; 
+        }
+        canvas { border-radius: 50%; border: 10px solid #fff; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+
+        /* 管理面板 */
+        .panel { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); width: 300px; }
+        .prize-item { display: flex; gap: 5px; margin-bottom: 8px; }
+        input { padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        .w-input { width: 50px; }
+        .t-input { flex: 1; }
+        
+        button { cursor: pointer; border: none; border-radius: 5px; font-weight: bold; }
+        .btn-add { background: #2ecc71; color: white; width: 100%; padding: 8px; margin-bottom: 10px; }
+        .btn-update { background: #3498db; color: white; width: 100%; padding: 10px; margin-top: 10px; }
+        .btn-spin { background: #e74c3c; color: white; padding: 15px 60px; font-size: 20px; margin-top: 30px; border-radius: 30px; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+    <h1>SpinWin</h1>
+
+    <div class="main-layout">
+        <div class="wheel-box">
+            <div class="pointer"></div>
+            <canvas id="wheel" width="400" height="400"></canvas>
+        </div>
+
+        <div class="panel">
+            <h3>Prize Configuration(Content|Weight)</h3>
+            <div id="prizeInputs">
+                <div class="prize-item">
+                    <input type="text" class="t-input" value="First Prize">
+                    <input type="number" class="w-input" value="5">
+                </div>
+                <div class="prize-item">
+                    <input type="text" class="t-input" value="Second Prize">
+                    <input type="number" class="w-input" value="15">
+                </div>
+                <div class="prize-item">
+                    <input type="text" class="t-input" value="TY For Participating">
+                    <input type="number" class="w-input" value="80">
+                </div>
+            </div>
+            <button class="btn-add" onclick="addInput()">+ Add Prize Items</button>
+            <button class="btn-update" onclick="updatePrizes()">Upload Wheel Data</button>
+            <p style="font-size: 12px; color: #666;">The higher the weight,the higher the probability </p>
+        </div>
+    </div>
+
+    <button class="btn-spin" id="spinBtn" onclick="spin()">Strat Lucky Draw</button>
+
+<script>
+    const canvas = document.getElementById('wheel');
+    const ctx = canvas.getContext('2d');
+    const spinBtn = document.getElementById('spinBtn');
+    
+    let prizes = [];
+    let totalWeight = 0;
+    let currentRotation = 0;
+    const colors = ["#f1c40f", "#e67e22", "#e74c3c", "#9b59b6", "#3498db", "#2ecc71", "#1abc9c", "#95a5a6"];
+
+    // 1. 初始化/更新数据
+    function updatePrizes() {
+        const rows = document.querySelectorAll('.prize-item');
+        prizes = [];
+        totalWeight = 0;
+        rows.forEach((row, i) => {
+            const text = row.querySelector('.t-input').value;
+            const weight = parseFloat(row.querySelector('.w-input').value) || 0;
+            if (text && weight > 0) {
+                prizes.push({ text, weight, color: colors[i % colors.length] });
+                totalWeight += weight;
+            }
+        });
+        draw();
+    }
+
+    // 2. 绘制转盘 (修正起始角度)
+    function draw() {
+        const num = prizes.length;
+        const arc = (Math.PI * 2) / num;
+        ctx.clearRect(0, 0, 400, 400);
+
+        prizes.forEach((p, i) => {
+            const angle = i * arc - Math.PI / 2; // 关键：减去90度，让第一个奖项的中心轴对准12点方向（或确保计算一致）
+            ctx.beginPath();
+            ctx.fillStyle = p.color;
+            ctx.moveTo(200, 200);
+            ctx.arc(200, 200, 200, angle, angle + arc);
+            ctx.fill();
+            ctx.stroke();
+
+            // 绘制文字
+            ctx.save();
+            ctx.translate(200, 200);
+            ctx.rotate(angle + arc / 2);
+            ctx.textAlign = "right";
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 16px Arial";
+            ctx.fillText(p.text, 180, 10);
+            ctx.restore();
+        });
+    }
+
+    // 3. 抽奖逻辑
+    function spin() {
+        if (prizes.length === 0) return alert("请先配置奖项");
+        spinBtn.disabled = true;
+
+        // 确定中奖索引
+        let random = Math.random() * totalWeight;
+        let winIndex = 0;
+        for (let i = 0; i < prizes.length; i++) {
+            random -= prizes[i].weight;
+            if (random <= 0) {
+                winIndex = i;
+                break;
+            }
+        }
+
+        // 计算旋转角度
+        const num = prizes.length;
+        const arcDeg = 360 / num;
+        
+        // 修正逻辑：
+        // 指针在正上方（270度位置），我们要让 winIndex 停在正上方
+        // 目标停止角度 = 360 - (winIndex * arcDeg) - (arcDeg / 2)
+        const baseRotation = 3600; // 多转10圈
+        const stopAngle = 360 - (winIndex * arcDeg) - (arcDeg / 2);
+        
+        // 累加旋转，避免倒转
+        currentRotation += baseRotation + (stopAngle - (currentRotation % 360));
+        
+        canvas.style.transition = "transform 4s cubic-bezier(0.15, 0, 0.2, 1)";
+        canvas.style.transform = `rotate(${currentRotation}deg)`;
+
+        setTimeout(() => {
+            alert("抽奖结果：" + prizes[winIndex].text);
+            spinBtn.disabled = false;
+        }, 4100);
+    }
+
+    // 辅助：添加输入框
+    function addInput() {
+        const div = document.createElement('div');
+        div.className = 'prize-item';
+        div.innerHTML = '<input type="text" class="t-input" placeholder="奖品名"><input type="number" class="w-input" placeholder="权重">';
+        document.getElementById('prizeInputs').appendChild(div);
+    }
+
+    // 初始化运行
+    updatePrizes();
+</script>
+</body>
+</html>
